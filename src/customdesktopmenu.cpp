@@ -17,7 +17,10 @@
 #include <KProcess>
 #include <KService>
 #include <KServiceGroup>
-
+#include <KRecentDocument>
+#include <PlasmaActivities/Stats/ResultSet>
+#include <PlasmaActivities/Stats/Terms>
+#include <PlasmaActivities/Stats/Query>
 #include <QDebug>
 #include <QDesktopServices>
 #include <QDir>
@@ -234,6 +237,31 @@ void CustomDesktopMenu::parseConfig()
             }
 
             fillFolder(folderPath, maxDepth, showHidden);
+        } else if (cfgLine.startsWith(QLatin1String("{recent-apps}"))) {
+            // {recent-apps}          or   {recent-apps}	12
+            const QStringList parts = cfgLine.split(QLatin1Char('\t'), Qt::SkipEmptyParts);
+            int limit = 10;
+            if (parts.size() > 1) {
+                bool ok = false;
+                const int value = parts.at(1).toInt(&ok);
+                if (ok && value > 0) {
+                    limit = value;
+                }
+            }
+            fillRecentApplications(limit);
+
+        } else if (cfgLine.startsWith(QLatin1String("{recent-files}"))) {
+            // {recent-files}         or   {recent-files}	15
+            const QStringList parts = cfgLine.split(QLatin1Char('\t'), Qt::SkipEmptyParts);
+            int limit = 10;
+            if (parts.size() > 1) {
+                bool ok = false;
+                const int value = parts.at(1).toInt(&ok);
+                if (ok && value > 0) {
+                    limit = value;
+                }
+            }
+            fillRecentFiles(limit);
 
         } else {
             // Custom command: Label	icon	command
@@ -386,15 +414,21 @@ void CustomDesktopMenu::fillFolder(const QString &path, int maxDepth,
             auto *action = new QAction(QIcon::fromTheme(QStringLiteral("folder")),
                                        info.fileName(), this);
             action->setMenu(subMenu);
-
-            // Clicking the folder opens it
-            const QString folderPath = info.absoluteFilePath();
-            connect(action, &QAction::triggered, this, [folderPath]() {
-                QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
-            });
-
             addAction(action);
 
+            // ---- Make the folder openable ----
+            const QString folderPath = info.absoluteFilePath();
+
+            // First item in the submenu: Open the folder
+            auto *openAction = new QAction(QIcon::fromTheme(QStringLiteral("document-open")),
+                                           tr("Open Folder"), this);
+            connect(openAction, &QAction::triggered, this, [folderPath]() {
+                QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
+            });
+            subMenu->addAction(openAction);
+            subMenu->addSeparator();
+
+            // Recurse into the folder
             m_menuList.append(subMenu);
             fillFolder(folderPath, maxDepth, showHidden, currentDepth + 1);
             m_menuList.removeLast();
@@ -416,7 +450,106 @@ void CustomDesktopMenu::fillFolder(const QString &path, int maxDepth,
         }
     }
 }
+void CustomDesktopMenu::fillRecentApplications(int limit)
+{
+    using namespace KActivities::Stats;
+    using namespace KActivities::Stats::Terms;
 
+    // More permissive query – the same style Kickoff / Kicker effectively use.
+    // We ask for more results than we need because we filter afterwards.
+    Query query = UsedResources
+                  | Agent::any()
+                  | Activity::any()
+                  | Limit(limit * 75)               // oversample
+                  | Order::RecentlyUsedFirst;      // true “recent”
+
+    ResultSet results(query);
+
+    int added = 0;
+
+    for (const ResultSet::Result &result : results) {
+        if (added >= limit) {
+            break;
+        }
+
+        QString resource = result.resource();
+
+        // Normalise applications: URLs → real .desktop path
+        if (resource.startsWith(QLatin1String("applications:"))) {
+            resource = QStandardPaths::locate(QStandardPaths::ApplicationsLocation,
+                                              resource.mid(13));   // strip "applications:"
+        }
+
+        // Only keep real desktop files
+        if (resource.isEmpty() || !KDesktopFile::isDesktopFile(resource)) {
+            continue;
+        }
+
+        KDesktopFile desktopFile(resource);
+        if (desktopFile.noDisplay()) {
+            continue;
+        }
+
+        QString text = desktopFile.readName();
+        if (text.isEmpty()) {
+            text = QFileInfo(resource).completeBaseName();
+        }
+        if (!m_showAppsByName && !desktopFile.readGenericName().isEmpty()) {
+            text = desktopFile.readGenericName();
+        }
+
+        auto *action = new QAction(QIcon::fromTheme(desktopFile.readIcon()), text, this);
+
+        connect(action, &QAction::triggered, this, [resource]() {
+            KService::Ptr service = KService::serviceByDesktopPath(resource);
+            if (service) {
+                auto *job = new KIO::ApplicationLauncherJob(service);
+                job->start();
+            }
+        });
+
+        addAction(action);
+        ++added;
+    }
+}
+
+void CustomDesktopMenu::fillRecentFiles(int limit)
+{
+    const QList<QUrl> recentUrls = KRecentDocument::recentUrls();
+
+    int count = 0;
+    for (const QUrl &url : recentUrls) {
+        if (count >= limit) {
+            break;
+        }
+
+        if (!url.isLocalFile()) {
+            continue;           // skip remote URLs for now
+        }
+
+        const QString filePath = url.toLocalFile();
+        QFileInfo info(filePath);
+
+        if (!info.exists()) {
+            continue;
+        }
+
+        // Nice icon via MIME type
+        QMimeDatabase mimeDb;
+        const QIcon icon = QIcon::fromTheme(
+            mimeDb.mimeTypeForFile(info).iconName(),
+            QIcon::fromTheme(info.isDir() ? QStringLiteral("folder") : QStringLiteral("unknown")));
+
+        auto *action = new QAction(icon, info.fileName(), this);
+
+        connect(action, &QAction::triggered, this, [filePath]() {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(filePath));
+        });
+
+        addAction(action);
+        ++count;
+    }
+}
 K_PLUGIN_CLASS_WITH_JSON(CustomDesktopMenu, "plasma-containmentactions-customdesktopmenu.json")
 
 #include "customdesktopmenu.moc"

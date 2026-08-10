@@ -67,6 +67,12 @@ private:
     
     // Maximum items shown in a folder menu
     int m_maxFolderEntries = 300;  
+    
+    // items shown in Recent Applications menu
+    void fillRecentApplications(int limit = 10);
+    
+    // items shown in Recent files menu
+    void fillRecentFiles(int limit = 10);
 
     // --- Helper methods ------------------------------------------
 

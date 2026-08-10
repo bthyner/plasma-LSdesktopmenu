@@ -5,7 +5,6 @@ project(plasma-containmentactions-customdesktopmenu)
 set(QT_MIN_VERSION "6.6.0")
 set(KF6_MIN_VERSION "6.0.0")
 set(KDE_COMPILERSETTINGS_LEVEL "5.82")
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -16,9 +15,18 @@ include(KDEInstallDirs)
 include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 
-find_package(Qt6 ${QT_MIN_VERSION} CONFIG REQUIRED NO_MODULE)
-find_package(KF6 ${KF6_MIN_VERSION} REQUIRED COMPONENTS I18n KIO)
-find_package(Plasma ${PROJECT_DEP_VERSION} REQUIRED)
+find_package(Qt6 ${QT_MIN_VERSION} CONFIG REQUIRED)
+
+find_package(KF6 ${KF6_MIN_VERSION} REQUIRED COMPONENTS
+    I18n
+    KIO
+    Service
+)
+
+# Plasma Activities Stats is now its own package (not under KF6)
+find_package(PlasmaActivitiesStats REQUIRED)
+
+find_package(Plasma REQUIRED)
 
 include_directories("${CMAKE_CURRENT_BINARY_DIR}")
 
@@ -27,12 +35,23 @@ add_definitions(-DTRANSLATION_DOMAIN=\"plasma_containmentactions_customdesktopme
 set(customdesktopmenu_SRCS
     customdesktopmenu.cpp
 )
+
 ki18n_wrap_ui(customdesktopmenu_SRCS config.ui)
 
-kcoreaddons_add_plugin(plasma_containmentactions_customdesktopmenu SOURCES ${customdesktopmenu_SRCS} INSTALL_NAMESPACE "plasma/containmentactions")
-
-set_target_properties(plasma_containmentactions_customdesktopmenu PROPERTIES
-    OUTPUT_NAME matmoul-customdesktopmenu
+kcoreaddons_add_plugin(plasma_containmentactions_customdesktopmenu
+    SOURCES ${customdesktopmenu_SRCS}
+    INSTALL_NAMESPACE "plasma/containmentactions"
 )
 
-target_link_libraries(plasma_containmentactions_customdesktopmenu Plasma::Plasma KF6::KIOCore KF6::KIOWidgets KF6::I18n)
+set_target_properties(plasma_containmentactions_customdesktopmenu PROPERTIES
+    OUTPUT_NAME "matmoul-customdesktopmenu"
+)
+
+target_link_libraries(plasma_containmentactions_customdesktopmenu
+    Plasma::Plasma
+    KF6::I18n
+    KF6::KIOCore
+    KF6::KIOWidgets
+    KF6::Service
+    Plasma::ActivitiesStats
+)
